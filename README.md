@@ -2,6 +2,8 @@
 
 A lightweight Telegram bot for downloading stickers as PNG/GIF files.
 
+**Try it now:** [@x_sticker_bot](https://t.me/x_sticker_bot)
+
 [中文文档](README_CN.md)
 
 ## Features

@@ -2,6 +2,8 @@
 
 一个轻量的 Telegram 贴纸下载机器人，发送贴纸即可获取 PNG/GIF 文件。
 
+**立即体验:** [@x_sticker_bot](https://t.me/x_sticker_bot)
+
 [English](README.md)
 
 ## 功能
