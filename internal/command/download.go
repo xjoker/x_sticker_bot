@@ -123,14 +123,7 @@ func (h *Handler) downloadSingleSticker(ctx context.Context, b *bot.Bot, chatID 
 			h.sendText(ctx, b, chatID, message.FatalError(err))
 			return
 		}
-		// Wrap GIF in ZIP to prevent Telegram from auto-converting it to MP4.
-		zipPath := filepath.Join(filepath.Dir(gifPath), namePrefix+"_"+sticker.SecHex(2)+".zip")
-		if err := sticker.FCompress(zipPath, []string{gifPath}); err != nil {
-			slog.Warn("failed to compress gif", "error", err)
-			h.sendText(ctx, b, chatID, message.FatalError(err))
-			return
-		}
-		h.sendDocument(ctx, b, chatID, zipPath, filepath.Base(zipPath))
+		h.sendDocument(ctx, b, chatID, gifPath, filepath.Base(gifPath))
 	} else {
 		pngPath, err := sticker.ToPng(filePath)
 		if err != nil {
@@ -498,8 +491,9 @@ func (h *Handler) sendDocument(ctx context.Context, b *bot.Bot, chatID int64, fi
 	defer f.Close()
 
 	_, err = b.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID:   chatID,
-		Document: &models.InputFileUpload{Filename: fileName, Data: f},
+		ChatID:                      chatID,
+		Document:                    &models.InputFileUpload{Filename: fileName, Data: f},
+		DisableContentTypeDetection: true,
 	})
 	if err != nil {
 		slog.Debug("sendDocument failed", "file", fileName, "error", err)
