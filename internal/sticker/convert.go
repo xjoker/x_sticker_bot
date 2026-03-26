@@ -214,7 +214,7 @@ func ToGif(f string) (string, error) {
 		args = append(args, "-c:v", "libvpx-vp9")
 	}
 	args = append(args, "-i", f, "-hide_banner",
-		"-lavfi", "split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=atkinson",
+		"-lavfi", "scale='min(256,iw)':-1:flags=lanczos,fps=15,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=atkinson",
 		"-gifflags", "-transdiff", "-gifflags", "-offsetting",
 		"-loglevel", "error", "-y", pathOut)
 
