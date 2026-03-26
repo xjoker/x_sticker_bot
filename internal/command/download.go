@@ -123,7 +123,14 @@ func (h *Handler) downloadSingleSticker(ctx context.Context, b *bot.Bot, chatID 
 			h.sendText(ctx, b, chatID, message.FatalError(err))
 			return
 		}
-		h.sendDocument(ctx, b, chatID, gifPath, filepath.Base(gifPath))
+		// Wrap GIF in ZIP to prevent Telegram from auto-converting it to MP4.
+		zipPath := filepath.Join(filepath.Dir(gifPath), namePrefix+"_"+sticker.SecHex(2)+".zip")
+		if err := sticker.FCompress(zipPath, []string{gifPath}); err != nil {
+			slog.Warn("failed to compress gif", "error", err)
+			h.sendText(ctx, b, chatID, message.FatalError(err))
+			return
+		}
+		h.sendDocument(ctx, b, chatID, zipPath, filepath.Base(zipPath))
 	} else {
 		pngPath, err := sticker.ToPng(filePath)
 		if err != nil {
