@@ -26,6 +26,7 @@ Runtime dependencies (called via `exec.Command`):
 | ffmpeg | Video/animation → GIF conversion | Yes |
 | ImageMagick | Image → PNG conversion | Yes |
 | bsdtar | Archive extraction / ZIP compression | Yes |
+| lottie_to_png | TGS sticker rendering | Yes for TGS |
 | gifsicle | GIF optimization | No (optional) |
 
 ## Quick Start
@@ -34,7 +35,17 @@ Runtime dependencies (called via `exec.Command`):
 
 ```bash
 # macOS
-brew install ffmpeg imagemagick gifsicle libarchive
+brew install ffmpeg imagemagick gifsicle libarchive cmake libpng
+
+# TGS rendering also needs lottie_to_png, built from the pinned source.
+git clone https://github.com/ed-asriyan/lottie-converter.git
+cd lottie-converter && git checkout 1d4756c982be303d732bae3478b804ef74ec4825
+cmake -S . -B build -DLOTTIE_MODULE=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build --target lottie_to_png
+mkdir -p "$HOME/.local/bin"
+install -m 755 build/bin/lottie_to_png "$HOME/.local/bin/lottie_to_png"
+export PATH="$HOME/.local/bin:$PATH"
+cd ..
 
 # Build & run
 go build -o x_sticker_bot ./cmd/x_sticker_bot
@@ -70,11 +81,13 @@ All parameters support CLI flags and environment variables. Env vars take priori
 ## Monitoring
 
 - Dashboard: `http://host:9090/dashboard`
+- When `ADMIN_TOKEN` is set, enter it in the dashboard sign-in form. The token is kept only in the current browser page.
 - Health check: `GET /api/health` (always public)
 - Metrics API: `GET /api/metrics` (behind auth if `ADMIN_TOKEN` set)
 - Stats API: `GET /api/stats` (behind auth if `ADMIN_TOKEN` set)
 
 **Security:** In production, always set `ADMIN_TOKEN` and bind port 9090 to `127.0.0.1` (default in docker-compose).
+`/api/health` returns `503` until polling first succeeds and after 130 seconds without a successful `getUpdates` response.
 
 ## Privacy
 

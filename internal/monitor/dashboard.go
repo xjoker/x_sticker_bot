@@ -1,8 +1,10 @@
 package monitor
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,17 +16,26 @@ type StatsProvider interface {
 
 // RegisterRoutes registers the monitoring dashboard and API endpoints.
 // activeTasksFn is an optional callback returning (active, capacity) for task monitoring.
-func RegisterRoutes(r gin.IRouter, m *Metrics, adminToken string, stats StatsProvider, activeTasksFn func() (int, int)) {
+func RegisterRoutes(r gin.IRouter, m *Metrics, adminToken string, stats StatsProvider, activeTasksFn func() (int, int), health *PollingHealth) {
 	// Health check is always public (used by Docker HEALTHCHECK)
 	r.GET("/api/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		status := PollStarting
+		if health != nil {
+			status = health.Status(time.Now())
+		}
+		code := http.StatusOK
+		if status != PollHealthy {
+			code = http.StatusServiceUnavailable
+		}
+		c.JSON(code, gin.H{"status": status})
 	})
+	r.GET("/dashboard", func(c *gin.Context) { c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(dashboardHTML)) })
 
 	group := r.Group("")
 	if adminToken != "" {
 		group.Use(func(c *gin.Context) {
 			auth := c.GetHeader("Authorization")
-			if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != adminToken {
+			if !strings.HasPrefix(auth, "Bearer ") || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, "Bearer ")), []byte(adminToken)) != 1 {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 				return
 			}
@@ -56,10 +67,6 @@ func RegisterRoutes(r gin.IRouter, m *Metrics, adminToken string, stats StatsPro
 			"total_downloads": totalDL,
 		})
 	})
-
-	group.GET("/dashboard", func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(dashboardHTML))
-	})
 }
 
 const dashboardHTML = `<!DOCTYPE html>
@@ -68,9 +75,20 @@ const dashboardHTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sticker Bot - Dashboard</title>
-<script src="https://cdn.tailwindcss.com"></script>
 <style>
-  body { background: #0f172a; color: #e2e8f0; }
+  body { background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; margin: 0; }
+  .max-w-4xl { max-width: 64rem; margin: 0 auto; }
+  .p-6 { padding: 1.5rem; }
+  .grid { display: grid; gap: 1rem; margin-bottom: 1rem; }
+  .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 640px) { .grid-cols-2, .grid-cols-3, .grid-cols-4 { grid-template-columns: 1fr; } }
+  .hidden { display: none; }
+  .login { max-width: 24rem; margin: 5rem auto; }
+  .login input, .login button { box-sizing: border-box; display: block; width: 100%; margin-top: .5rem; padding: .6rem; border-radius: .375rem; }
+  .login input { background: #0f172a; border: 1px solid #475569; color: #f1f5f9; }
+  .login button { border: 0; background: #2563eb; color: white; cursor: pointer; }
   .card { background: #1e293b; border-radius: 0.75rem; padding: 1.25rem; }
   .card-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.25rem; }
   .card-value { font-size: 1.75rem; font-weight: 700; color: #f1f5f9; }
@@ -86,7 +104,17 @@ const dashboardHTML = `<!DOCTYPE html>
   .bar-info { background: #f59e0b; }
 </style>
 </head>
-<body class="min-h-screen p-6">
+<body>
+<section id="login" class="login card hidden">
+  <h1>Sticker Bot Monitor</h1>
+  <form id="login-form">
+    <label for="token">Admin token</label>
+    <input id="token" type="password" autocomplete="off" required>
+    <button type="submit">Sign in</button>
+    <p id="login-error" role="alert"></p>
+  </form>
+</section>
+<div id="dashboard" class="min-h-screen p-6">
 <div class="max-w-4xl mx-auto">
   <h1 class="text-2xl font-bold mb-6 text-slate-200">Sticker Bot Monitor</h1>
 
@@ -155,9 +183,22 @@ const dashboardHTML = `<!DOCTYPE html>
 </div>
 
 <script>
+let adminToken = '';
+function authHeaders() { return adminToken ? {Authorization: 'Bearer ' + adminToken} : {}; }
+function showLogin(message) {
+  document.getElementById('dashboard').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  document.getElementById('login-error').textContent = message || '';
+}
+async function fetchJSON(path) {
+  const response = await fetch(path, {headers: authHeaders()});
+  if (response.status === 401) { showLogin('Invalid admin token.'); throw new Error('unauthorized'); }
+  if (!response.ok) throw new Error('request failed');
+  return response.json();
+}
 function update() {
-  fetch('/api/metrics')
-    .then(r => r.json())
+  if (document.getElementById('dashboard').classList.contains('hidden')) return;
+  fetchJSON('/api/metrics')
     .then(d => {
       document.getElementById('uptime').textContent = d.uptime;
       document.getElementById('memory').textContent = d.memory_mb.toFixed(1) + ' MB';
@@ -176,10 +217,9 @@ function update() {
         tb.innerHTML += '<tr><td>' + e[0] + '</td><td class="text-right">' + e[1] + '</td></tr>';
       });
     })
-    .catch(function(err) { console.error('fetch error', err); });
+    .catch(function(err) { if (err.message !== 'unauthorized') console.error('fetch error', err); });
 
-  fetch('/api/stats')
-    .then(r => r.json())
+  fetchJSON('/api/stats')
     .then(d => {
       document.getElementById('totalUsers').textContent = d.total_users || 0;
       document.getElementById('totalDL').textContent = d.total_downloads || 0;
@@ -206,9 +246,19 @@ function update() {
           barCell(r.info_queries, maxInfo, 'bar-info') + '</tr>';
       });
     })
-    .catch(function(err) { console.error('stats error', err); });
+    .catch(function(err) { if (err.message !== 'unauthorized') console.error('stats error', err); });
 }
-update();
+document.getElementById('login-form').addEventListener('submit', function(event) {
+  event.preventDefault();
+  adminToken = document.getElementById('token').value;
+  document.getElementById('token').value = '';
+  document.getElementById('dashboard').classList.remove('hidden');
+  document.getElementById('login').classList.add('hidden');
+  update();
+});
+fetchJSON('/api/metrics').then(update).catch(function(err) {
+  if (err.message !== 'unauthorized') showLogin('Dashboard is unavailable.');
+});
 setInterval(update, 5000);
 </script>
 </body>

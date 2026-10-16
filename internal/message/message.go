@@ -2,6 +2,7 @@ package message
 
 import (
 	"fmt"
+	"html"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -99,9 +100,13 @@ func PartialDownload(succeeded, total int) string {
 func FatalError(err error) string {
 	errMsg := ""
 	if err != nil {
-		errMsg = err.Error()
+		errMsg = html.EscapeString(err.Error())
 	}
 	return "<b>Error, please try again. / 处理失败，请重试。</b> /start\n\n<code>" + errMsg + "</code>"
+}
+
+func DocumentUploadFailed() string {
+	return "Failed to send the file. Please try again. /start\n文件发送失败，请重试。"
 }
 
 func ServerBusy() string {

@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"html"
 	"log/slog"
 	"sync"
 
@@ -27,7 +28,7 @@ type Handler struct {
 	AdminUID int64
 
 	GlobalSem chan struct{} // global concurrency limiter, init in factory
-	userTasks sync.Map     // map[int64]bool — tracks active user tasks
+	userTasks sync.Map      // map[int64]bool — tracks active user tasks
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +211,7 @@ func (h *Handler) HandleStickerInfo(ctx context.Context, b *bot.Bot, chatID int6
 	case "custom_emoji":
 		stickerType = "Custom Emoji / 自定义 Emoji"
 	}
+	stickerType = html.EscapeString(stickerType)
 
 	var staticCount, videoCount, animatedCount int
 	for _, st := range ss.Stickers {
@@ -241,8 +243,7 @@ func (h *Handler) HandleStickerInfo(ctx context.Context, b *bot.Bot, chatID int6
 <b>Type / 类型:</b> %s
 <b>Count / 数量:</b> %d
 %s<b>Link / 链接:</b> https://t.me/addstickers/%s`,
-		ss.Title, ss.Name, stickerType, len(ss.Stickers), formatInfo, ss.Name)
+		html.EscapeString(ss.Title), html.EscapeString(ss.Name), stickerType, len(ss.Stickers), formatInfo, html.EscapeString(ss.Name))
 
 	h.sendText(ctx, b, chatID, text)
 }
-

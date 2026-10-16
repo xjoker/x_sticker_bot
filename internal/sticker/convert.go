@@ -5,12 +5,14 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 )
 
 var ffmpegBin = "ffmpeg"
+var lottieToPNGBin = "lottie_to_png"
 var bsdtarBin = "bsdtar"
 var convertBin = "convert"
 var identifyBin = "identify"
@@ -52,7 +54,7 @@ func InitConvert() {
 func CheckDeps() []string {
 	var missing []string
 
-	bins := []string{ffmpegBin, bsdtarBin, convertBin, "gifsicle"}
+	bins := []string{ffmpegBin, lottieToPNGBin, bsdtarBin, convertBin, "gifsicle"}
 	for _, bin := range bins {
 		if _, err := exec.LookPath(bin); err != nil {
 			missing = append(missing, bin)
@@ -205,6 +207,10 @@ func ToWebmSafe(f string, isCustomEmoji bool) (string, error) {
 // It uses FFmpeg's palette-based conversion for better quality, then
 // optimizes with gifsicle if available.
 func ToGif(f string) (string, error) {
+	if strings.EqualFold(filepath.Ext(f), ".tgs") {
+		return tgsToGif(f)
+	}
+
 	pathOut := f + ".gif"
 	bin := ffmpegBin
 

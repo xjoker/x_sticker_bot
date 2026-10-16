@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -32,8 +33,8 @@ type App struct {
 	Stats   *storage.Stats
 	BotName string
 
-	cmdHandler     CommandHandler
-	ActiveTasksFn  func() (int, int) // returns (active, capacity) for task monitoring
+	cmdHandler    CommandHandler
+	ActiveTasksFn func() (int, int) // returns (active, capacity) for task monitoring
 }
 
 // CommandHandler is the interface the command package must implement.
@@ -66,8 +67,6 @@ func Run(cfg *config.Config, factory CommandHandlerFactory) error {
 
 	// Initialize rate limiter
 	app.Limiter = ratelimit.New(100, 200)
-	app.Limiter.SetCommandRate("/start", 5.0/60, 2)
-	app.Limiter.SetCommandRate("/about", 5.0/60, 2)
 
 	// Initialize temp file manager
 	dataDir := cfg.DataDir
@@ -113,7 +112,12 @@ func Run(cfg *config.Config, factory CommandHandlerFactory) error {
 	defer sticker.CloseWorkers()
 
 	// Create bot
-	b, err := tgbot.New(cfg.BotToken, tgbot.WithDefaultHandler(app.defaultHandler))
+	pollHealth := monitor.NewPollingHealth(pollStaleAfter)
+	b, err := tgbot.New(cfg.BotToken,
+		tgbot.WithDefaultHandler(app.defaultHandler),
+		tgbot.WithHTTPClient(pollTimeout, newPollingHTTPClient(&http.Client{Timeout: pollTimeout}, pollHealth)),
+		tgbot.WithErrorsHandler(func(err error) { logTelegramError(cfg.BotToken, err) }),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create bot: %w", err)
 	}
@@ -163,20 +167,14 @@ func Run(cfg *config.Config, factory CommandHandlerFactory) error {
 		}
 	}()
 
-	// Register command handlers (MatchTypeCommand expects pattern WITHOUT leading '/')
-	startHandler := app.withRateLimit("/start", app.routeCommand)
-	b.RegisterHandler(tgbot.HandlerTypeMessageText, "start", tgbot.MatchTypeCommand, startHandler)
-	b.RegisterHandler(tgbot.HandlerTypeMessageText, "help", tgbot.MatchTypeCommand, startHandler) // shares /start bucket
-	b.RegisterHandler(tgbot.HandlerTypeMessageText, "about", tgbot.MatchTypeCommand, app.withRateLimit("/about", app.routeCommand))
-	b.RegisterHandler(tgbot.HandlerTypeMessageText, "info", tgbot.MatchTypeCommand, app.routeCommand)
-	b.RegisterHandler(tgbot.HandlerTypeMessageText, "getfid", tgbot.MatchTypeCommand, app.routeCommand)
+	app.registerCommandHandlers(b)
 
 	// Start monitoring dashboard
 	if cfg.MonitorListenAddr != "" {
 		if cfg.AdminToken == "" {
 			slog.Warn("ADMIN_TOKEN is not set — monitoring dashboard has no authentication")
 		}
-		go app.startMonitorServer(cfg)
+		go app.startMonitorServer(cfg, pollHealth)
 	}
 
 	slog.Info("bot started, polling for updates")
@@ -184,6 +182,20 @@ func Run(cfg *config.Config, factory CommandHandlerFactory) error {
 
 	slog.Info("bot stopped")
 	return nil
+}
+
+// registerCommandHandlers registers command handlers with their command-specific limits.
+func (app *App) registerCommandHandlers(b *tgbot.Bot) {
+	app.Limiter.SetCommandRate("/start", 5.0/60, 2)
+	app.Limiter.SetCommandRate("/about", 5.0/60, 2)
+	app.Limiter.SetCommandRate("/info", 5.0/60, 2)
+	// MatchTypeCommand expects patterns without a leading '/'.
+	startHandler := app.withRateLimit("/start", app.routeCommand)
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "start", tgbot.MatchTypeCommand, startHandler)
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "help", tgbot.MatchTypeCommand, startHandler) // shares /start bucket
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "about", tgbot.MatchTypeCommand, app.withRateLimit("/about", app.routeCommand))
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "info", tgbot.MatchTypeCommand, app.withRateLimit("/info", app.routeCommand))
+	b.RegisterHandler(tgbot.HandlerTypeMessageText, "getfid", tgbot.MatchTypeCommand, app.routeCommand)
 }
 
 // routeCommand dispatches registered command messages to the appropriate handler.
@@ -275,7 +287,7 @@ func extractCommand(text string) string {
 }
 
 // startMonitorServer starts the Gin monitoring dashboard server.
-func (app *App) startMonitorServer(cfg *config.Config) {
+func (app *App) startMonitorServer(cfg *config.Config, health *monitor.PollingHealth) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -284,7 +296,7 @@ func (app *App) startMonitorServer(cfg *config.Config) {
 	if app.Stats != nil {
 		statsProvider = app.Stats
 	}
-	monitor.RegisterRoutes(r, app.Metrics, cfg.AdminToken, statsProvider, app.ActiveTasksFn)
+	monitor.RegisterRoutes(r, app.Metrics, cfg.AdminToken, statsProvider, app.ActiveTasksFn, health)
 
 	slog.Info("monitoring dashboard started", "addr", cfg.MonitorListenAddr)
 	if err := r.Run(cfg.MonitorListenAddr); err != nil {

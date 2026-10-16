@@ -26,6 +26,7 @@
 | ffmpeg | 视频/动画 → GIF 转换 | 是 |
 | ImageMagick | 图片 → PNG 转换 | 是 |
 | bsdtar | 压缩包解压 / ZIP 打包 | 是 |
+| lottie_to_png | TGS 贴纸渲染 | TGS 必需 |
 | gifsicle | GIF 优化 | 否（可选） |
 
 ## 快速开始
@@ -34,7 +35,17 @@
 
 ```bash
 # macOS 安装依赖
-brew install ffmpeg imagemagick gifsicle libarchive
+brew install ffmpeg imagemagick gifsicle libarchive cmake libpng
+
+# TGS 渲染还需要从固定源码构建 lottie_to_png。
+git clone https://github.com/ed-asriyan/lottie-converter.git
+cd lottie-converter && git checkout 1d4756c982be303d732bae3478b804ef74ec4825
+cmake -S . -B build -DLOTTIE_MODULE=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build --target lottie_to_png
+mkdir -p "$HOME/.local/bin"
+install -m 755 build/bin/lottie_to_png "$HOME/.local/bin/lottie_to_png"
+export PATH="$HOME/.local/bin:$PATH"
+cd ..
 
 # 构建运行
 go build -o x_sticker_bot ./cmd/x_sticker_bot
@@ -70,11 +81,13 @@ docker compose logs -f
 ## 监控
 
 - 面板：`http://host:9090/dashboard`
+- 设置 `ADMIN_TOKEN` 后，在面板登录框输入 Token；Token 仅保存在当前浏览器页面内存中。
 - 健康检查：`GET /api/health`（始终公开）
 - 指标 API：`GET /api/metrics`（设置 `ADMIN_TOKEN` 后需认证）
 - 统计 API：`GET /api/stats`（设置 `ADMIN_TOKEN` 后需认证）
 
 **安全提示：** 生产环境务必设置 `ADMIN_TOKEN`，并将 9090 端口绑定到 `127.0.0.1`（docker-compose 默认已配置）。
+轮询首次成功前，以及超过 130 秒没有成功的 `getUpdates` 响应时，`/api/health` 返回 `503`。
 
 ## 隐私
 

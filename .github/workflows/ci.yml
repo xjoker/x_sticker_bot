@@ -1,0 +1,29 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build -o /tmp/x_sticker_bot ./cmd/x_sticker_bot
+      - run: docker build --platform=linux/amd64 -t x-sticker-bot:test .
+      - name: Convert a TGS animation with the shipped tools
+        run: |
+          CGO_ENABLED=0 go test -c -o /tmp/sticker.test ./internal/sticker
+          docker run --rm --platform=linux/amd64 \
+            --network=none --read-only --tmpfs /tmp \
+            -v /tmp/sticker.test:/usr/local/bin/sticker.test:ro \
+            -e STICKER_INTEGRATION=1 --entrypoint /usr/local/bin/sticker.test \
+            x-sticker-bot:test -test.run TestToGifConvertsTGS -test.v

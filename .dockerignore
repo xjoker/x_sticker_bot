@@ -1,0 +1,7 @@
+.git/
+.env
+bot_data/
+data/
+.local-backups/
+*.backup-*
+/x_sticker_bot

@@ -123,14 +123,20 @@ func (h *Handler) downloadSingleSticker(ctx context.Context, b *bot.Bot, chatID 
 			h.sendText(ctx, b, chatID, message.FatalError(err))
 			return
 		}
-		h.sendDocument(ctx, b, chatID, gifPath, filepath.Base(gifPath))
+		if err := h.sendDocument(ctx, b, chatID, gifPath, filepath.Base(gifPath)); err != nil {
+			slog.Warn("failed to send converted sticker", "file", filepath.Base(gifPath), "error", err)
+			h.sendText(ctx, b, chatID, message.DocumentUploadFailed())
+		}
 	} else {
 		pngPath, err := sticker.ToPng(filePath)
 		if err != nil {
 			slog.Warn("failed to convert sticker to png, sending original", "error", err)
 			pngPath = filePath
 		}
-		h.sendDocument(ctx, b, chatID, pngPath, filepath.Base(pngPath))
+		if err := h.sendDocument(ctx, b, chatID, pngPath, filepath.Base(pngPath)); err != nil {
+			slog.Warn("failed to send converted sticker", "file", filepath.Base(pngPath), "error", err)
+			h.sendText(ctx, b, chatID, message.DocumentUploadFailed())
+		}
 	}
 }
 
@@ -242,8 +248,20 @@ func (h *Handler) downloadStickerSet(ctx context.Context, b *bot.Bot, chatID int
 		zipPaths = append(zipPaths, convZips...)
 	}
 
+	if len(zipPaths) == 0 {
+		h.sendText(ctx, b, chatID, message.DocumentUploadFailed())
+		return
+	}
+
+	failedUploads := 0
 	for _, zp := range zipPaths {
-		h.sendDocument(ctx, b, chatID, zp, filepath.Base(zp))
+		if err := h.sendDocument(ctx, b, chatID, zp, filepath.Base(zp)); err != nil {
+			failedUploads++
+			slog.Warn("failed to send sticker archive", "file", filepath.Base(zp), "error", err)
+		}
+	}
+	if failedUploads > 0 {
+		h.sendText(ctx, b, chatID, message.DocumentUploadFailed())
 	}
 }
 
@@ -374,7 +392,10 @@ func (h *Handler) handleAnimationDownload(ctx context.Context, b *bot.Bot, chatI
 		return
 	}
 
-	h.sendDocument(ctx, b, chatID, zipPath, filepath.Base(zipPath))
+	if err := h.sendDocument(ctx, b, chatID, zipPath, filepath.Base(zipPath)); err != nil {
+		slog.Warn("failed to send converted animation", "file", filepath.Base(zipPath), "error", err)
+		h.sendText(ctx, b, chatID, message.DocumentUploadFailed())
+	}
 	h.deleteMessage(ctx, b, chatID, progressID)
 }
 
@@ -482,11 +503,10 @@ func (h *Handler) downloadTelegramFile(ctx context.Context, b *bot.Bot, fileID, 
 }
 
 // sendDocument sends a file as a document to the chat.
-func (h *Handler) sendDocument(ctx context.Context, b *bot.Bot, chatID int64, filePath, fileName string) {
+func (h *Handler) sendDocument(ctx context.Context, b *bot.Bot, chatID int64, filePath, fileName string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
-		slog.Warn("sendDocument: failed to open file", "path", filePath, "error", err)
-		return
+		return fmt.Errorf("open document: %w", err)
 	}
 	defer f.Close()
 
@@ -496,8 +516,9 @@ func (h *Handler) sendDocument(ctx context.Context, b *bot.Bot, chatID int64, fi
 		DisableContentTypeDetection: true,
 	})
 	if err != nil {
-		slog.Debug("sendDocument failed", "file", fileName, "error", err)
+		return fmt.Errorf("send document: %w", err)
 	}
+	return nil
 }
 
 // getSIDFromMessage extracts a sticker set ID from a message (from sticker or text link).
@@ -514,18 +535,35 @@ func (h *Handler) getSIDFromMessage(msg *models.Message) string {
 
 // findTGLink extracts a t.me sticker link from text.
 func findTGLink(text string) (link string, found bool) {
-	if !strings.Contains(text, "t.me") && !strings.Contains(text, "telegram.me") {
-		return "", false
-	}
 	for _, word := range strings.Fields(text) {
-		if !strings.Contains(word, "t.me") && !strings.Contains(word, "telegram.me") {
+		if strings.ContainsAny(word, "?#") {
 			continue
 		}
 		u, err := url.Parse(word)
 		if err != nil {
 			continue
 		}
-		if u.Host == "t.me" || u.Host == "telegram.me" {
+		if (u.Scheme != "http" && u.Scheme != "https") ||
+			(u.Host != "t.me" && u.Host != "telegram.me") ||
+			u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+			continue
+		}
+		const prefix = "/addstickers/"
+		if !strings.HasPrefix(u.Path, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(u.Path, prefix)
+		if name == "" || strings.Contains(name, "/") {
+			continue
+		}
+		valid := true
+		for _, c := range name {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_') {
+				valid = false
+				break
+			}
+		}
+		if valid {
 			return word, true
 		}
 	}

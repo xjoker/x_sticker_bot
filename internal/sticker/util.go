@@ -1,9 +1,11 @@
 package sticker
 
 import (
+	"archive/zip"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -109,16 +111,55 @@ func matchFilter(path string, mustHave, mustNotHave []string) bool {
 }
 
 // FCompress creates a ZIP archive at path f containing the given files.
-// It strips 2 path components from each file path in the archive.
-func FCompress(f string, flist []string) error {
-	args := []string{"--strip-components", "2", "-avcf", f}
-	args = append(args, flist...)
+// Archive members use only the source file base names.
+func FCompress(f string, flist []string) (err error) {
+	names := make(map[string]struct{}, len(flist))
+	for _, file := range flist {
+		name := filepath.Base(file)
+		if _, exists := names[name]; exists {
+			return fmt.Errorf("FCompress: duplicate archive member name %q", name)
+		}
+		names[name] = struct{}{}
+	}
+
+	output, err := os.Create(f)
+	if err != nil {
+		return fmt.Errorf("FCompress: create archive: %w", err)
+	}
+	defer func() {
+		if closeErr := output.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("FCompress: close archive: %w", closeErr)
+		}
+		if err != nil {
+			_ = os.Remove(f)
+		}
+	}()
+
+	writer := zip.NewWriter(output)
+	defer func() {
+		if closeErr := writer.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("FCompress: finalize archive: %w", closeErr)
+		}
+	}()
 
 	slog.Debug("FCompress", "output", f, "files", len(flist))
-	out, err := exec.Command(bsdtarBin, args...).CombinedOutput()
-	if err != nil {
-		slog.Error("FCompress failed", "error", err, "output", string(out))
-		return fmt.Errorf("FCompress: bsdtar failed: %w", err)
+	for _, file := range flist {
+		input, openErr := os.Open(file)
+		if openErr != nil {
+			return fmt.Errorf("FCompress: open %q: %w", file, openErr)
+		}
+
+		member, createErr := writer.Create(filepath.Base(file))
+		if createErr == nil {
+			_, createErr = io.Copy(member, input)
+		}
+		closeErr := input.Close()
+		if createErr != nil {
+			return fmt.Errorf("FCompress: write %q: %w", file, createErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("FCompress: close %q: %w", file, closeErr)
+		}
 	}
 	return nil
 }

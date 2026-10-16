@@ -7,8 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var userDirName = regexp.MustCompile(`^[0-9]+_[0-9a-f]{16}$`)
 
 // TempManager manages temporary directories for user operations.
 type TempManager struct {
@@ -51,15 +54,16 @@ func (tm *TempManager) CreateUserDir(uid int64) (string, error) {
 // CleanUserDir removes the specified directory. It validates that the path
 // is within baseDir before removing.
 func (tm *TempManager) CleanUserDir(dir string) error {
-	if _, err := tm.SafePath(dir); err != nil {
+	path, err := tm.managedUserDir(dir)
+	if err != nil {
 		return fmt.Errorf("storage: clean user dir: %w", err)
 	}
 
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("storage: remove dir %q: %w", dir, err)
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("storage: remove dir %q: %w", path, err)
 	}
 
-	slog.Debug("cleaned user temp dir", "path", dir)
+	slog.Debug("cleaned user temp dir", "path", path)
 	return nil
 }
 
@@ -75,7 +79,7 @@ func (tm *TempManager) PurgeOutdated(maxAge time.Duration) (int, error) {
 	purged := 0
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || !userDirName.MatchString(entry.Name()) {
 			continue
 		}
 
@@ -100,6 +104,24 @@ func (tm *TempManager) PurgeOutdated(maxAge time.Duration) (int, error) {
 		slog.Info("purged outdated temp directories", "count", purged)
 	}
 	return purged, nil
+}
+
+func (tm *TempManager) managedUserDir(dir string) (string, error) {
+	path, err := tm.SafePath(dir)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Dir(path) != tm.baseDir || !userDirName.MatchString(filepath.Base(path)) {
+		return "", fmt.Errorf("path %q is not a managed user directory", dir)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("path %q is not a managed user directory", dir)
+	}
+	return path, nil
 }
 
 // SafePath validates that the given path resolves to a location within baseDir.
