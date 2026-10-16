@@ -1,12 +1,17 @@
 FROM golang:1.27.2-alpine AS builder
 
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+
 RUN apk add --no-cache git
 
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o x_sticker_bot ./cmd/x_sticker_bot
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X github.com/xjoker/x_sticker_bot/internal/bot.BotVersion=${VERSION} -X github.com/xjoker/x_sticker_bot/internal/bot.GitCommit=${GIT_COMMIT}" \
+    -o x_sticker_bot ./cmd/x_sticker_bot
 
 FROM alpine:3.21 AS lottie-builder
 
@@ -24,6 +29,13 @@ RUN cd /build/lottie-converter \
     && cp build/_deps/argparse-src/LICENSE /licenses/lottie-converter/argparse.LICENSE
 
 FROM alpine:3.21
+
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/xjoker/x_sticker_bot" \
+    org.opencontainers.image.version="${VERSION}" \
+    org.opencontainers.image.revision="${GIT_COMMIT}"
 
 ENV TZ=UTC
 

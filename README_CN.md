@@ -82,7 +82,7 @@ docker compose logs -f
 
 - 面板：`http://host:9090/dashboard`
 - 设置 `ADMIN_TOKEN` 后，在面板登录框输入 Token；Token 仅保存在当前浏览器页面内存中。
-- 健康检查：`GET /api/health`（始终公开）
+- 健康检查：`GET /api/health`（始终公开；返回状态、版本和 Git 提交号）
 - 指标 API：`GET /api/metrics`（设置 `ADMIN_TOKEN` 后需认证）
 - 统计 API：`GET /api/stats`（设置 `ADMIN_TOKEN` 后需认证）
 

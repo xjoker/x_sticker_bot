@@ -82,7 +82,7 @@ All parameters support CLI flags and environment variables. Env vars take priori
 
 - Dashboard: `http://host:9090/dashboard`
 - When `ADMIN_TOKEN` is set, enter it in the dashboard sign-in form. The token is kept only in the current browser page.
-- Health check: `GET /api/health` (always public)
+- Health check: `GET /api/health` (always public; returns status, version, and Git commit)
 - Metrics API: `GET /api/metrics` (behind auth if `ADMIN_TOKEN` set)
 - Stats API: `GET /api/stats` (behind auth if `ADMIN_TOKEN` set)
 

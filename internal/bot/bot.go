@@ -21,7 +21,10 @@ import (
 	"github.com/xjoker/x_sticker_bot/internal/storage"
 )
 
-const BotVersion = "1.0.0"
+var (
+	BotVersion = "dev"
+	GitCommit  = "unknown"
+)
 
 // App is the main application container holding all dependencies.
 type App struct {
@@ -296,7 +299,7 @@ func (app *App) startMonitorServer(cfg *config.Config, health *monitor.PollingHe
 	if app.Stats != nil {
 		statsProvider = app.Stats
 	}
-	monitor.RegisterRoutes(r, app.Metrics, cfg.AdminToken, statsProvider, app.ActiveTasksFn, health)
+	monitor.RegisterRoutes(r, app.Metrics, cfg.AdminToken, statsProvider, app.ActiveTasksFn, health, BotVersion, GitCommit)
 
 	slog.Info("monitoring dashboard started", "addr", cfg.MonitorListenAddr)
 	if err := r.Run(cfg.MonitorListenAddr); err != nil {

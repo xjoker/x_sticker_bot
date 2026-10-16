@@ -10,6 +10,9 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
@@ -19,7 +22,19 @@ jobs:
       - run: go test -race ./...
       - run: go vet ./...
       - run: go build -o /tmp/x_sticker_bot ./cmd/x_sticker_bot
-      - run: docker build --platform=linux/amd64 -t x-sticker-bot:test .
+      - name: Read image version
+        id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Build container image
+        env:
+          IMAGE_VERSION: ${{ steps.version.outputs.value }}
+          GIT_COMMIT: ${{ github.sha }}
+        run: |
+          docker buildx build --platform=linux/amd64 --no-cache --load \
+            --build-arg VERSION="$IMAGE_VERSION" \
+            --build-arg GIT_COMMIT="$GIT_COMMIT" \
+            --tag "ghcr.io/xjoker/x_sticker_bot:$IMAGE_VERSION" \
+            --tag ghcr.io/xjoker/x_sticker_bot:latest .
       - name: Convert a TGS animation with the shipped tools
         run: |
           CGO_ENABLED=0 go test -c -o /tmp/sticker.test ./internal/sticker
@@ -27,4 +42,13 @@ jobs:
             --network=none --read-only --tmpfs /tmp \
             -v /tmp/sticker.test:/usr/local/bin/sticker.test:ro \
             -e STICKER_INTEGRATION=1 --entrypoint /usr/local/bin/sticker.test \
-            x-sticker-bot:test -test.run TestToGifConvertsTGS -test.v
+            ghcr.io/xjoker/x_sticker_bot:latest -test.run TestToGifConvertsTGS -test.v
+      - name: Push container image to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "ghcr.io/xjoker/x_sticker_bot:$IMAGE_VERSION"
+          docker push ghcr.io/xjoker/x_sticker_bot:latest

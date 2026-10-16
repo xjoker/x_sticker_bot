@@ -16,7 +16,7 @@ type StatsProvider interface {
 
 // RegisterRoutes registers the monitoring dashboard and API endpoints.
 // activeTasksFn is an optional callback returning (active, capacity) for task monitoring.
-func RegisterRoutes(r gin.IRouter, m *Metrics, adminToken string, stats StatsProvider, activeTasksFn func() (int, int), health *PollingHealth) {
+func RegisterRoutes(r gin.IRouter, m *Metrics, adminToken string, stats StatsProvider, activeTasksFn func() (int, int), health *PollingHealth, version, gitCommit string) {
 	// Health check is always public (used by Docker HEALTHCHECK)
 	r.GET("/api/health", func(c *gin.Context) {
 		status := PollStarting
@@ -27,7 +27,7 @@ func RegisterRoutes(r gin.IRouter, m *Metrics, adminToken string, stats StatsPro
 		if status != PollHealthy {
 			code = http.StatusServiceUnavailable
 		}
-		c.JSON(code, gin.H{"status": status})
+		c.JSON(code, gin.H{"status": status, "version": version, "git_commit": gitCommit})
 	})
 	r.GET("/dashboard", func(c *gin.Context) { c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(dashboardHTML)) })
 

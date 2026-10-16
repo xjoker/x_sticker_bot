@@ -1,6 +1,6 @@
 services:
   bot:
-    image: xjoker/x_sticker_bot:latest
+    image: ghcr.io/xjoker/x_sticker_bot:latest
     restart: unless-stopped
     env_file: .env
     environment:

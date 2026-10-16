@@ -14,7 +14,7 @@ func TestRegisterRoutesProtectsAPIsButServesLoginShell(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	health := NewPollingHealth(130 * time.Second)
-	RegisterRoutes(r, NewMetrics(), "secret", nil, nil, health)
+	RegisterRoutes(r, NewMetrics(), "secret", nil, nil, health, "test-version", "test-commit")
 
 	for _, tc := range []struct {
 		path string
@@ -51,7 +51,7 @@ func TestRegisterRoutesProtectsAPIsButServesLoginShell(t *testing.T) {
 func TestRegisterRoutesLeavesAPIsPublicWithoutAdminToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, NewMetrics(), "", nil, nil, NewPollingHealth(130*time.Second))
+	RegisterRoutes(r, NewMetrics(), "", nil, nil, NewPollingHealth(130*time.Second), "dev", "unknown")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics", nil))
 	if w.Code != http.StatusOK {
@@ -63,11 +63,14 @@ func TestHealthTracksPollingFreshness(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	health := NewPollingHealth(130 * time.Second)
 	r := gin.New()
-	RegisterRoutes(r, NewMetrics(), "", nil, nil, health)
+	RegisterRoutes(r, NewMetrics(), "", nil, nil, health, "test-version", "test-commit")
 
 	status := func() int {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+		if !strings.Contains(w.Body.String(), `"version":"test-version"`) || !strings.Contains(w.Body.String(), `"git_commit":"test-commit"`) {
+			t.Errorf("health response missing build metadata: %s", w.Body.String())
+		}
 		return w.Code
 	}
 	if got := status(); got != http.StatusServiceUnavailable {
