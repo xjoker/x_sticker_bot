@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Telegram Sticker Downloader Bot** — Download Telegram stickers as PNG/GIF. Written in Go 1.26, uses long-polling.
+**Telegram Sticker Downloader Bot** — Download Telegram stickers as PNG/GIF. Written in Go 1.27.2, uses long-polling.
 
 ## Build & Run
 
